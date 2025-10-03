@@ -124,7 +124,12 @@ package struct LintOrAnalyzeOptions {
 
 package struct LintOrAnalyzeCommand {
     package static func run(_ options: LintOrAnalyzeOptions) async throws {
+        let runStartMessage = "LintOrAnalyzeCommand.run start. mode: \(options.mode), pathsCount: \(options.paths.count), " +
+            "autocorrect: \(options.autocorrect), progress: \(options.progress)"
+        queuedDebugLog(runStartMessage)
         if let workingDirectory = options.workingDirectory {
+            let workingDirectoryMessage = "Requested working directory change to: \(workingDirectory)"
+            queuedDebugLog(workingDirectoryMessage)
             if !FileManager.default.changeCurrentDirectoryPath(workingDirectory) {
                 throw SwiftLintError.usageError(
                     description: """
@@ -133,47 +138,86 @@ package struct LintOrAnalyzeCommand {
                                  """
                 )
             }
+            let currentDirectory = FileManager.default.currentDirectoryPath
+            let currentDirectoryMessage = "Working directory set to: \(currentDirectory)"
+            queuedDebugLog(currentDirectoryMessage)
         }
+        let taskDescription = options.autocorrect ? "autocorrect" : options.mode.verb
+        let executingMessage = "LintOrAnalyzeCommand.run executing task: \(taskDescription)"
+        queuedDebugLog(executingMessage)
         try await Signposts.record(name: "LintOrAnalyzeCommand.run") {
             try await options.autocorrect ? autocorrect(options) : lintOrAnalyze(options)
         }
+        let finishedMessage = "LintOrAnalyzeCommand.run finished task: \(taskDescription)"
+        queuedDebugLog(finishedMessage)
     }
 
     private static func lintOrAnalyze(_ options: LintOrAnalyzeOptions) async throws {
+        let lintStartMessage = "LintOrAnalyzeCommand.lintOrAnalyze start. benchmark: \(options.benchmark), quiet: \(options.quiet), " +
+            "checkForUpdates: \(options.checkForUpdates)"
+        queuedDebugLog(lintStartMessage)
         let builder = LintOrAnalyzeResultBuilder(options)
+        let builderMessage = "LintOrAnalyzeCommand.lintOrAnalyze builder ready. reporter: \(builder.reporter), " +
+            "cacheEnabled: \(builder.cache != nil)"
+        queuedDebugLog(builderMessage)
         let files = try await collectViolations(builder: builder)
+        let collectedMessage = "LintOrAnalyzeCommand.lintOrAnalyze collected violations for \(files.count) files. " +
+            "Unfiltered violations count: \(builder.unfilteredViolations.count)"
+        queuedDebugLog(collectedMessage)
         if let baselineOutputPath = options.writeBaseline ?? builder.configuration.writeBaseline {
+            let baselineMessage = "LintOrAnalyzeCommand.lintOrAnalyze writing baseline to: \(baselineOutputPath)"
+            queuedDebugLog(baselineMessage)
             try Baseline(violations: builder.unfilteredViolations).write(toPath: baselineOutputPath)
         }
         let numberOfSeriousViolations = try Signposts.record(name: "LintOrAnalyzeCommand.PostProcessViolations") {
             try postProcessViolations(files: files, builder: builder)
         }
+        let postProcessMessage = "LintOrAnalyzeCommand.lintOrAnalyze post processing done. Serious violations: \(numberOfSeriousViolations)"
+        queuedDebugLog(postProcessMessage)
         if options.checkForUpdates || builder.configuration.checkForUpdates {
+            queuedDebugLog("LintOrAnalyzeCommand.lintOrAnalyze checking for updates")
             await UpdateChecker.checkForUpdates()
         }
         if numberOfSeriousViolations > 0 {
+            queuedDebugLog("LintOrAnalyzeCommand.lintOrAnalyze exiting with code 2 due to serious violations")
             exit(2)
         }
+        queuedDebugLog("LintOrAnalyzeCommand.lintOrAnalyze completed without exiting")
     }
 
     private static func collectViolations(builder: LintOrAnalyzeResultBuilder) async throws -> [SwiftLintFile] {
         let options = builder.options
+        let collectStartMessage = "collectViolations start. useSTDIN: \(options.useSTDIN), pathsCount: \(options.paths.count), " +
+            "onlyRuleCount: \(options.onlyRule.count)"
+        queuedDebugLog(collectStartMessage)
         let visitorMutationQueue = DispatchQueue(label: "io.realm.swiftlint.lintVisitorMutation")
         let baseline = try baseline(options, builder.configuration)
-        return try await builder.configuration.visitLintableFiles(options: options, cache: builder.cache,
-                                                                  storage: builder.storage) { linter in
+        let baselineMessage = "collectViolations baseline available: \(baseline != nil)"
+        queuedDebugLog(baselineMessage)
+        queuedDebugLog("collectViolations preparing to visit lintable files")
+        let processedFiles = try await builder.configuration.visitLintableFiles(options: options, cache: builder.cache,
+                                                                               storage: builder.storage) { linter in
+            let filePath = linter.file.path ?? "<no-path>"
+            let visitingFileMessage = "collectViolations visiting file: \(filePath)"
+            queuedDebugLog(visitingFileMessage)
             let currentViolations: [StyleViolation]
             if options.benchmark {
                 CustomRuleTimer.shared.activate()
                 let start = Date()
                 let (violationsBeforeLeniency, currentRuleTimes) = linter
                     .styleViolationsAndRuleTimes(using: builder.storage)
+                let rawCount = violationsBeforeLeniency.count
+                let rawViolationsMessage = "collectViolations benchmark raw violations: \(rawCount) for file: \(filePath)"
+                queuedDebugLog(rawViolationsMessage)
                 currentViolations = applyLeniency(
                     options: options,
                     strict: builder.configuration.strict,
                     lenient: builder.configuration.lenient,
                     violations: violationsBeforeLeniency
                 )
+                let leniencyCount = currentViolations.count
+                let benchmarkLeniencyMessage = "collectViolations benchmark leniency applied: \(leniencyCount) for file: \(filePath)"
+                queuedDebugLog(benchmarkLeniencyMessage)
                 visitorMutationQueue.sync {
                     builder.fileBenchmark.record(file: linter.file, from: start)
                     currentRuleTimes.forEach { builder.ruleBenchmark.record(id: $0, time: $1) }
@@ -185,16 +229,29 @@ package struct LintOrAnalyzeCommand {
                     lenient: builder.configuration.lenient,
                     violations: linter.styleViolations(using: builder.storage)
                 )
+                let leniencyCount = currentViolations.count
+                let leniencyMessage = "collectViolations leniency applied: \(leniencyCount) for file: \(filePath)"
+                queuedDebugLog(leniencyMessage)
             }
             let filteredViolations = baseline?.filter(currentViolations) ?? currentViolations
+            let filteredCount = filteredViolations.count
+            let filteredMessage = "collectViolations filtered violations: \(filteredCount) for file: \(filePath)"
+            queuedDebugLog(filteredMessage)
             visitorMutationQueue.sync {
                 builder.unfilteredViolations += currentViolations
                 builder.violations += filteredViolations
             }
 
             linter.file.invalidateCache()
+            let invalidatedMessage = "collectViolations invalidated cache for file: \(filePath)"
+            queuedDebugLog(invalidatedMessage)
             builder.report(violations: filteredViolations, realtimeCondition: true)
+            let reportedMessage = "collectViolations reported violations for file: \(filePath)"
+            queuedDebugLog(reportedMessage)
         }
+        let processedMessage = "collectViolations completed. processedFilesCount: \(processedFiles.count)"
+        queuedDebugLog(processedMessage)
+        return processedFiles
     }
 
     private static func postProcessViolations(
@@ -203,13 +260,18 @@ package struct LintOrAnalyzeCommand {
     ) throws -> Int {
         let options = builder.options
         let configuration = builder.configuration
+        let postStartMessage = "postProcessViolations start. filesCount: \(files.count), currentViolations: \(builder.violations.count)"
+        queuedDebugLog(postStartMessage)
         if isWarningThresholdBroken(configuration: configuration, violations: builder.violations), !options.lenient {
             builder.violations.append(
                 createThresholdViolation(threshold: configuration.warningThreshold!)
             )
             builder.report(violations: [builder.violations.last!], realtimeCondition: true)
+            queuedDebugLog("postProcessViolations warning threshold exceeded. Added threshold violation")
         }
         builder.report(violations: builder.violations, realtimeCondition: false)
+        let aggregateMessage = "postProcessViolations reported aggregate violations: \(builder.violations.count)"
+        queuedDebugLog(aggregateMessage)
         let numberOfSeriousViolations = builder.violations.filter({ $0.severity == .error }).count
         if !options.quiet {
             printStatus(violations: builder.violations, files: files, serious: numberOfSeriousViolations,
@@ -224,16 +286,28 @@ package struct LintOrAnalyzeCommand {
             if !options.quiet, let memoryUsage = memoryUsage() {
                 queuedPrintError(memoryUsage)
             }
+            queuedDebugLog("postProcessViolations saved benchmark data")
         }
         try builder.cache?.save()
+        let cacheMessage = "postProcessViolations cache save attempted. cacheEnabled: \(builder.cache != nil)"
+        queuedDebugLog(cacheMessage)
+        let seriousMessage = "postProcessViolations serious violations count: \(numberOfSeriousViolations)"
+        queuedDebugLog(seriousMessage)
         return numberOfSeriousViolations
     }
 
     private static func baseline(_ options: LintOrAnalyzeOptions, _ configuration: Configuration) throws -> Baseline? {
         if let baselinePath = options.baseline ?? configuration.baseline {
+            let baselineLoadMessage = "baseline loading from path: \(baselinePath)"
+            queuedDebugLog(baselineLoadMessage)
             do {
-                return try Baseline(fromPath: baselinePath)
+                let loaded = try Baseline(fromPath: baselinePath)
+                let baselineSuccessMessage = "baseline successfully loaded from path: \(baselinePath)"
+                queuedDebugLog(baselineSuccessMessage)
+                return loaded
             } catch {
+                let baselineFailureMessage = "baseline failed to load from path: \(baselinePath) with error: \(error)"
+                queuedDebugLog(baselineFailureMessage)
                 Issue.baselineNotReadable(path: baselinePath).print()
                 if (error as? CocoaError)?.code != CocoaError.fileReadNoSuchFile ||
                         options.writeBaseline != options.baseline {
@@ -376,16 +450,30 @@ private class LintOrAnalyzeResultBuilder {
     let options: LintOrAnalyzeOptions
 
     init(_ options: LintOrAnalyzeOptions) {
+        let initStartMessage = "LintOrAnalyzeResultBuilder init start. configurationFiles: \(options.configurationFiles), " +
+            "cachePath: \(String(describing: options.cachePath)), enableAllRules: \(options.enableAllRules)"
+        queuedDebugLog(initStartMessage)
         let config = Signposts.record(name: "LintOrAnalyzeCommand.ParseConfiguration") {
             Configuration(options: options)
         }
         configuration = config
-        reporter = reporterFrom(identifier: options.reporter ?? config.reporter)
+        let configMessage = "LintOrAnalyzeResultBuilder configuration resolved. rulesCount: \(config.rules.count), " +
+            "rootDirectory: \(config.rootDirectory)"
+        queuedDebugLog(configMessage)
+        let resolvedReporter = reporterFrom(identifier: options.reporter ?? config.reporter)
+        reporter = resolvedReporter
+        let reporterMessage = "LintOrAnalyzeResultBuilder reporter resolved: \(resolvedReporter)"
+        queuedDebugLog(reporterMessage)
+        let cacheInstance: LinterCache?
         if options.ignoreCache || ProcessInfo.processInfo.isLikelyXcodeCloudEnvironment {
-            cache = nil
+            cacheInstance = nil
         } else {
-            cache = LinterCache(configuration: config)
+            cacheInstance = LinterCache(configuration: config)
         }
+        cache = cacheInstance
+        let cacheEnabled = cacheInstance != nil
+        let cacheMessage = "LintOrAnalyzeResultBuilder cache enabled: \(cacheEnabled)"
+        queuedDebugLog(cacheMessage)
         self.options = options
 
         if let outFile = options.output {
@@ -395,6 +483,7 @@ private class LintOrAnalyzeResultBuilder {
                 Issue.fileNotWritable(path: outFile).print()
             }
         }
+        queuedDebugLog("LintOrAnalyzeResultBuilder init complete")
     }
 
     func report(violations: [StyleViolation], realtimeCondition: Bool) {

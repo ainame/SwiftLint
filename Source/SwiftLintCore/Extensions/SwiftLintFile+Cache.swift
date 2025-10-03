@@ -25,12 +25,26 @@ private let structureDictionaryCache = Cache { file in
     responseCache.get(file).map(Structure.init).map { SourceKittenDictionary($0.dictionary) }
 }
 private let syntaxTreeCache = Cache { file -> SourceFileSyntax in
-    Parser.parse(source: file.contents)
+    let pathDescription = file.path ?? "<no-path>"
+    let source = file.contents
+    let sourceLength = source.utf8.count
+    let parsingStartMessage = "syntaxTreeCache parsing start for: \(pathDescription), length: \(sourceLength)"
+    queuedDebugLog(parsingStartMessage)
+    let tree = Parser.parse(source: source)
+    let parsingCompleteMessage = "syntaxTreeCache parsing completed for: \(pathDescription)"
+    queuedDebugLog(parsingCompleteMessage)
+    return tree
 }
 private let foldedSyntaxTreeCache = Cache { file -> SourceFileSyntax? in
-    OperatorTable.standardOperators
+    let pathDescription = file.path ?? "<no-path>"
+    let foldingStartMessage = "foldedSyntaxTreeCache folding start for: \(pathDescription)"
+    queuedDebugLog(foldingStartMessage)
+    let folded = OperatorTable.standardOperators
         .foldAll(file.syntaxTree) { _ in /* Don't handle errors. */ }
         .as(SourceFileSyntax.self)
+    let foldingCompleteMessage = "foldedSyntaxTreeCache folding completed for: \(pathDescription), success: \(folded != nil)"
+    queuedDebugLog(foldingCompleteMessage)
+    return folded
 }
 private let locationConverterCache = Cache { file -> SourceLocationConverter in
     SourceLocationConverter(fileName: file.path ?? "<nopath>", tree: file.syntaxTree)

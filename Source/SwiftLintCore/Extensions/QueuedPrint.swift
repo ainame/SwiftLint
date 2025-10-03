@@ -48,6 +48,18 @@ public func queuedPrintError(_ string: String) {
 }
 
 /**
+ A thread-safe helper to emit debug logs for tracing lint execution.
+
+ - parameter message: Debug message to print.
+ */
+public func queuedDebugLog(_ message: @autoclosure @Sendable @escaping () -> String) {
+    outputQueue.async {
+        fflush(stdout)
+        fputs("[LintDebug] \(message())\n", stderr)
+    }
+}
+
+/**
  A thread-safe, newline-terminated version of `fatalError(...)` that doesn't leak
  the source path from the compiled binary.
  */

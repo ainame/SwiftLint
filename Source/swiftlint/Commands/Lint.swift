@@ -23,6 +23,9 @@ extension SwiftLint {
         var paths = [String]()
 
         func run() async throws {
+            let startMessage = "Lint.run invoked. useSTDIN: \(useSTDIN), quiet: \(quiet), fix: \(common.fix), " +
+                "leniency: \(String(describing: common.leniency)), pathsCount: \(paths.count)"
+            queuedDebugLog(startMessage)
             Issue.printDeprecationWarnings = !silenceDeprecationWarnings
 
             if common.fix, let leniency = common.leniency {
@@ -31,6 +34,8 @@ extension SwiftLint {
 
             // Lint files in current working directory if no paths were specified.
             let allPaths = paths.isNotEmpty ? paths : [""]
+            let resolvedPathsMessage = "Lint.run resolved paths: \(allPaths)"
+            queuedDebugLog(resolvedPathsMessage)
             let options = LintOrAnalyzeOptions(
                 mode: .lint,
                 paths: allPaths,
@@ -60,7 +65,13 @@ extension SwiftLint {
                 compileCommands: nil,
                 checkForUpdates: common.checkForUpdates
             )
+            let optionsMessage = "Lint.run constructed options. enableAllRules: \(enableAllRules), " +
+                "onlyRuleCount: \(common.onlyRule.count), format: \(common.format), " +
+                "fix: \(common.fix)"
+            queuedDebugLog(optionsMessage)
+            queuedDebugLog("Lint.run delegating to LintOrAnalyzeCommand.run")
             try await LintOrAnalyzeCommand.run(options)
+            queuedDebugLog("Lint.run completed without throwing")
         }
     }
 }

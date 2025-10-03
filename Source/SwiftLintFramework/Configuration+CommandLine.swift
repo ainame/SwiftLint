@@ -78,29 +78,42 @@ extension Configuration {
         let files = try Signposts.record(name: "Configuration.VisitLintableFiles.GetFiles") {
             try getFiles(with: visitor)
         }
+        let retrievedFilesMessage = "Configuration.visitLintableFiles retrieved files count: \(files.count)"
+        queuedDebugLog(retrievedFilesMessage)
         let groupedFiles = try Signposts.record(name: "Configuration.VisitLintableFiles.GroupFiles") {
             try groupFiles(files, visitor: visitor)
         }
+        let groupedFilesMessage = "Configuration.visitLintableFiles grouped files across \(groupedFiles.count) configurations"
+        queuedDebugLog(groupedFilesMessage)
         let lintersForFile = Signposts.record(name: "Configuration.VisitLintableFiles.LintersForFile") {
             groupedFiles.map { file in
                 linters(for: [file.key: file.value], visitor: visitor)
             }
         }
+        let lintersGroupMessage = "Configuration.visitLintableFiles prepared linters groups: \(lintersForFile.count)"
+        queuedDebugLog(lintersGroupMessage)
         let duplicateFileNames = Signposts.record(name: "Configuration.VisitLintableFiles.DuplicateFileNames") {
             lintersForFile.map(\.duplicateFileNames)
         }
+        queuedDebugLog("Configuration.visitLintableFiles computed duplicate filename sets")
         let collected = await Signposts.record(name: "Configuration.VisitLintableFiles.Collect") {
             await zip(lintersForFile, duplicateFileNames).asyncMap { linters, duplicateFileNames in
                 await collect(linters: linters, visitor: visitor, storage: storage,
                               duplicateFileNames: duplicateFileNames)
             }
         }
+        let collectedLintersMessage = "Configuration.visitLintableFiles collected linters: \(collected.count)"
+        queuedDebugLog(collectedLintersMessage)
         let result = await Signposts.record(name: "Configuration.VisitLintableFiles.Visit") {
             await collected.asyncMap { linters, duplicateFileNames in
                 await visit(linters: linters, visitor: visitor, duplicateFileNames: duplicateFileNames)
             }
         }
-        return result.flatMap { $0 }
+        let flattenedResult = result.flatMap { $0 }
+        let visitedCount = flattenedResult.count
+        let visitedLintersMessage = "Configuration.visitLintableFiles visited linters. Returning files count: \(visitedCount)"
+        queuedDebugLog(visitedLintersMessage)
+        return flattenedResult
     }
 
     private func groupFiles(_ files: [SwiftLintFile], visitor: LintableFilesVisitor) throws(SwiftLintError)
@@ -110,6 +123,9 @@ extension Configuration {
                 description: "No lintable files found at paths: '\(visitor.options.paths.joined(separator: ", "))'"
             )
         }
+
+        let groupingMessage = "Configuration.groupFiles evaluating \(files.count) files for grouping"
+        queuedDebugLog(groupingMessage)
 
         return files.parallelFilterGroup { file in
             let fileConfiguration = configuration(for: file)
@@ -144,10 +160,14 @@ extension Configuration {
     private func linters(for filesPerConfiguration: [Configuration: [SwiftLintFile]],
                          visitor: LintableFilesVisitor) -> [Linter] {
         let fileCount = filesPerConfiguration.reduce(0) { $0 + $1.value.count }
+        let lintersMessage = "Configuration.linters creating linters for \(fileCount) files across \(filesPerConfiguration.count) configurations"
+        queuedDebugLog(lintersMessage)
 
         var linters = [Linter]()
         linters.reserveCapacity(fileCount)
         for (config, files) in filesPerConfiguration {
+            let configMessage = "Configuration.linters processing config rooted at: \(config.rootDirectory) with files: \(files.count)"
+            queuedDebugLog(configMessage)
             let newConfig: Configuration
             if visitor.cache != nil {
                 newConfig = config.withPrecomputedCacheDescription()
@@ -166,11 +186,16 @@ extension Configuration {
         let counter = CounterActor()
         let total = linters.filter(\.isCollecting).count
         let progress = ProgressBar(count: total)
+        let collectMessage = "Configuration.collect starting. totalCollecting: \(total), parallel: \(visitor.parallel)"
+        queuedDebugLog(collectMessage)
         if visitor.options.progress, total > 0 {
             await progress.initialize()
         }
         let collect = { (linter: Linter) -> CollectedLinter? in
             let skipFile = visitor.shouldSkipFile(atPath: linter.file.path)
+            let path = linter.file.path ?? "<no-path>"
+            let visitingMessage = "Configuration.collect visiting file: \(path). skip: \(skipFile)"
+            queuedDebugLog(visitingMessage)
             if !visitor.options.quiet, linter.isCollecting {
                 if visitor.options.progress {
                     await progress.printNext()
@@ -202,6 +227,8 @@ extension Configuration {
         let collectedLinters = await visitor.parallel ?
             linters.concurrentCompactMap(collect) :
             linters.asyncCompactMap(collect)
+        let collectedCountMessage = "Configuration.collect finished. collectedCount: \(collectedLinters.count)"
+        queuedDebugLog(collectedCountMessage)
         return (collectedLinters, duplicateFileNames)
     }
 
@@ -210,6 +237,8 @@ extension Configuration {
                        duplicateFileNames: Set<String>) async -> [SwiftLintFile] {
         let counter = CounterActor()
         let progress = ProgressBar(count: linters.count)
+        let visitMessage = "Configuration.visit starting. lintersCount: \(linters.count), parallel: \(visitor.parallel)"
+        queuedDebugLog(visitMessage)
         if visitor.options.progress {
             await progress.initialize()
         }
@@ -229,6 +258,8 @@ extension Configuration {
             await Signposts.record(name: "Configuration.Visit", span: .file(linter.file.path ?? "")) {
                 await visitor.block(linter)
             }
+            let completedMessage = "Configuration.visit completed block for file: \(linter.file.path ?? "<no-path>")"
+            queuedDebugLog(completedMessage)
             return linter.file
         }
         return await visitor.parallel ?
@@ -272,15 +303,20 @@ extension Configuration {
 
             queuedPrintError("\(options.capitalizedVerb) Swift files \(filesInfo)")
         }
+        let scanningMessage = "Configuration.getFiles scanning paths: \(options.paths)"
+        queuedDebugLog(scanningMessage)
         let excludeLintableFilesBy = options.useExcludingByPrefix
             ? Configuration.ExcludeBy.prefix
             : .paths(excludedPaths: excludedPaths())
-        return options.paths.flatMap {
+        let lintable = options.paths.flatMap {
             self.lintableFiles(
                 inPath: $0,
                 forceExclude: options.forceExclude,
                 excludeBy: excludeLintableFilesBy)
         }
+        let foundMessage = "Configuration.getFiles found lintable files: \(lintable.count)"
+        queuedDebugLog(foundMessage)
+        return lintable
     }
 
     func visitLintableFiles(options: LintOrAnalyzeOptions,

@@ -104,13 +104,20 @@ private extension Rule {
               superfluousDisableCommandRule: SuperfluousDisableCommandRule?,
               compilerArguments: [String]) -> LintResult {
         let ruleID = Self.identifier
+        let filePathDescription = file.path ?? "<no-path>"
+        let evaluatingMessage = "Rule \(ruleID) evaluating file: \(filePathDescription)"
+        queuedDebugLog(evaluatingMessage)
 
         // Wrap entire lint process including shouldRun check in rule context
         return CurrentRule.$identifier.withValue(ruleID) {
             guard shouldRun(onFile: file) else {
+                let skippingMessage = "Rule \(ruleID) skipping file: \(filePathDescription)"
+                queuedDebugLog(skippingMessage)
                 return LintResult(violations: [], ruleTime: nil, deprecatedToValidIDPairs: [])
             }
 
+            let runningMessage = "Rule \(ruleID) running on file: \(filePathDescription)"
+            queuedDebugLog(runningMessage)
             return performLint(
                 file: file,
                 regions: regions,
@@ -141,6 +148,8 @@ private extension Rule {
             violations = validate(file: file, using: storage, compilerArguments: compilerArguments)
             ruleTime = nil
         }
+        let rawViolationsMessage = "Rule \(ruleID) produced \(violations.count) raw violations for file: \(file.path ?? "<no-path>")"
+        queuedDebugLog(rawViolationsMessage)
 
         let (disabledViolationsAndRegions, enabledViolationsAndRegions) = violations.map { violation in
             (violation, regions.first { $0.contains(violation.location) })
@@ -183,7 +192,11 @@ private extension Rule {
             return identifiers.map { ($0, ruleID) }
         }
 
-        return LintResult(violations: enabledViolations + superfluousDisableCommandViolations,
+        let finalViolations = enabledViolations + superfluousDisableCommandViolations
+        let finalMessage = "Rule \(ruleID) returning \(finalViolations.count) violations for file: \(file.path ?? "<no-path>")"
+        queuedDebugLog(finalMessage)
+
+        return LintResult(violations: finalViolations,
                           ruleTime: ruleTime,
                           deprecatedToValidIDPairs: deprecatedToValidIDPairs)
     }
