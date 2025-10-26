@@ -1,6 +1,6 @@
 # Changelog
 
-## Main
+## 0.0.3: mimalloc with .a
 
 ### Breaking
 
