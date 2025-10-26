@@ -235,8 +235,8 @@ let package = Package(
 package.targets.append(
     .binaryTarget(
         name: "SwiftLintBinary",
-        url: "https://github.com/realm/SwiftLint/releases/download/0.62.1/SwiftLintBinary.artifactbundle.zip",
-        checksum: "7be75aeb533dd91e66e1d47123828643d7fa606807de1b0335c3cc14d2d1abc2"
+        url: "https://github.com/realm/SwiftLint/releases/download/0.0.2/SwiftLintBinary.artifactbundle.zip",
+        checksum: "c830c145c0613fbfad43e489707389770f692e551f98a5296c64dfce1c81bac3"
     )
 )
 #endif
