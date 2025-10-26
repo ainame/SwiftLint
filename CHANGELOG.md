@@ -1,6 +1,6 @@
 # Changelog
 
-## Main
+## 0.0.2: mimalloc-test
 
 ### Breaking
 
